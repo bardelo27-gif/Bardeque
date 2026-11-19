@@ -152,11 +152,10 @@ footer b{color:#FF6B7F}
 <script>
 /* ============ ΡΥΘΜΙΣΕΙΣ — επεξεργάσου μόνο αυτό το μπλοκ ============ */
 const CONFIG = {
-  web3formsKey: "38749d88-ce63-4e72-a92b-d9f71211aac9",   // Access Key από το Web3Forms (έρχεται στο email σου)
-  ownerEmail: "bardequee@outlook.com.gr",   // εφεδρικό κουμπί email
+  ownerEmail: "bardequee@outlook.com.gr",   // email που θα λαμβάνει τις παραγγελίες (για κουμπί email)
   ownerWhatsApp: "306972295910",            // WhatsApp με κωδικό χώρας, χωρίς + ή κενά
-  orderEndpoint: "",         // (προαιρετικό) άλλο URL που δέχεται POST JSON
-  availabilityUrl: "",       // URL που επιστρέφει JSON: ["2026-12-24","2026-12-25"] = κλεισμένες ημερομηνίες
+  web3formsKey: "38749d88-ce63-4e72-a92b-d9f71211aac9",   // Access Key Web3Forms (αυτόματο email με κάθε κράτηση)
+  bookingApi: "",            // URL Google Apps Script — καταγράφει κρατήσεις & μπλοκάρει την ημέρα
   blockedDates: [],          // χειροκίνητα κλεισμένες ημερομηνίες, π.χ. ["2026-12-24","2026-12-25"]
   minLeadDays: 3,            // ελάχιστες ημέρες από σήμερα
   maxMonthsAhead: 12,
@@ -196,9 +195,9 @@ $("liveP").textContent = eur(CONFIG.liveCooking);
 $("helperP").textContent = eur(CONFIG.helper);
 
 async function loadAvailability(){
-  if(!CONFIG.availabilityUrl) return;
+  if(!CONFIG.bookingApi) return;
   try{
-    const r = await fetch(CONFIG.availabilityUrl + (CONFIG.availabilityUrl.includes("?")?"&":"?") + "t=" + Date.now());
+    const r = await fetch(CONFIG.bookingApi + (CONFIG.bookingApi.includes("?")?"&":"?") + "t=" + Date.now());
     const j = await r.json();
     (Array.isArray(j)?j:(j.blocked||[])).forEach(d => blocked.add(String(d).slice(0,10)));
     renderCal();
@@ -320,9 +319,26 @@ $("submit").onclick = async () => {
   };
   o.text = orderText(o); last = o;
   $("submit").disabled = true;
-  let sent = false, failed = false;
+  let sent = false, failed = false, reserved = false;
 
-  /* 1) Web3Forms → email */
+  /* 1) Κράτηση ημερομηνίας — μπλοκάρει την ημέρα (Google Sheet) */
+  if(CONFIG.bookingApi){
+    try{
+      const r = await fetch(CONFIG.bookingApi,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(o)});
+      const j = await r.json();
+      if(j.ok){ reserved = true; }
+      else {
+        $("submit").disabled = false;
+        if(j.error === "taken"){
+          blocked.add(o.date); selected = null; renderCal(); updatePicked(); updateSummary();
+          $("err").textContent = "Η ημερομηνία μόλις δεσμεύτηκε. Διάλεξε άλλη ημέρα.";
+        } else $("err").textContent = "Η κράτηση δεν ολοκληρώθηκε. Δοκίμασε ξανά.";
+        return;
+      }
+    }catch(e){ /* αν δεν απαντήσει ο server, συνεχίζουμε με email/WhatsApp */ }
+  }
+
+  /* 2) Web3Forms → email */
   if(hasKey()){
     try{
       const r = await fetch(WEB3FORMS_URL,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},
@@ -344,13 +360,7 @@ $("submit").onclick = async () => {
       if(r.ok && j.success) sent = true; else failed = true;
     }catch(e){ failed = true; }
   }
-  /* 2) προαιρετικό δεύτερο endpoint */
-  if(CONFIG.orderEndpoint){
-    try{
-      const r = await fetch(CONFIG.orderEndpoint,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(o)});
-      if(r.ok) sent = true; else if(!sent) failed = true;
-    }catch(e){ if(!sent) failed = true; }
-  }
+  if(reserved) sent = true;
   $("submit").disabled = false;
   showDone(o, sent, failed);
 };
