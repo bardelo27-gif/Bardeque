@@ -71,6 +71,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--red);outline-off
 .done pre{text-align:left;background:var(--cream);border:1px solid var(--line);border-radius:8px;padding:14px;white-space:pre-wrap;font-family:inherit;max-width:560px;margin:14px auto}
 .done .btns{max-width:560px;margin:0 auto}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.vatnote{font-size:12px;color:var(--grey);margin-top:10px}
 footer{background:var(--ink);color:#fff;text-align:center;padding:16px;margin-top:40px;font-weight:600;font-size:14px}
 footer b{color:#FF6B7F}
 </style>
@@ -118,6 +119,7 @@ footer b{color:#FF6B7F}
         <hr style="border:0;border-top:1px dashed var(--line);margin:10px 0">
         <div class="l"><label class="chk"><input type="checkbox" id="helper"><span><b>Βοηθητικό προσωπικό</b> <small style="color:var(--grey)">· ένα άτομο για υποστήριξη προετοιμασίας &amp; service</small></span></label><span class="price" id="helperP"></span></div>
       </div>
+      <p class="vatnote">Όλες οι τιμές περιλαμβάνουν ΦΠΑ 24%.</p>
     </div>
 
     <aside class="sum">
@@ -155,16 +157,19 @@ const CONFIG = {
   ownerEmail: "bardequee@outlook.com.gr",   // email που θα λαμβάνει τις παραγγελίες (για κουμπί email)
   ownerWhatsApp: "306972295910",            // WhatsApp με κωδικό χώρας, χωρίς + ή κενά
   web3formsKey: "38749d88-ce63-4e72-a92b-d9f71211aac9",   // Access Key Web3Forms (αυτόματο email με κάθε κράτηση)
-  bookingApi: "",            // URL Google Apps Script — καταγράφει κρατήσεις & μπλοκάρει την ημέρα
+  blockedUrl: "blocked.json",               // αρχείο με τις κλεισμένες ημέρες (στο ίδιο repository)
   blockedDates: [],          // χειροκίνητα κλεισμένες ημερομηνίες, π.χ. ["2026-12-24","2026-12-25"]
   minLeadDays: 3,            // ελάχιστες ημέρες από σήμερα
   maxMonthsAhead: 12,
   firstHour: 11, lastHour: 22,   // ώρες έναρξης στη λίστα
   eventHours: 4,             // διάρκεια εκδήλωσης για το ημερολόγιο (.ics)
-  liveCooking: 200,
-  helperBase: 70, helperVat: 0.24   // βοηθός: 70 € + 24% = 86,80 €
+  vat: 0.24,                 // ΦΠΑ — εφαρμόζεται σε ΟΛΑ (πίτσες, live cooking, βοηθός)
+  liveBase: 200,             // Live Cooking χωρίς ΦΠΑ
+  helperBase: 70             // βοηθός χωρίς ΦΠΑ
 };
-CONFIG.helper = Math.round(CONFIG.helperBase * (1 + CONFIG.helperVat) * 100) / 100;
+const gross = n => Math.round(n * (1 + CONFIG.vat) * 100) / 100;   // τιμή με ΦΠΑ
+CONFIG.liveCooking = gross(CONFIG.liveBase);     // 248,00 €
+CONFIG.helper = gross(CONFIG.helperBase);        // 86,80 €
 const WEB3FORMS_URL = "https://api.web3forms.com/submit";
 const hasKey = () => CONFIG.web3formsKey && !/ΒΑΛΕ_ΕΔΩ/.test(CONFIG.web3formsKey);
 const MENU = [
@@ -194,14 +199,17 @@ const qty = {}; MENU.forEach(p => qty[p.id]=0);
 $("liveP").textContent = eur(CONFIG.liveCooking);
 $("helperP").textContent = eur(CONFIG.helper);
 
+/* Φορτώνει τις κλεισμένες ημέρες από το blocked.json (π.χ. ["2026-12-24","2026-12-31"]) */
 async function loadAvailability(){
-  if(!CONFIG.bookingApi) return;
+  if(!CONFIG.blockedUrl) return;
   try{
-    const r = await fetch(CONFIG.bookingApi + (CONFIG.bookingApi.includes("?")?"&":"?") + "t=" + Date.now());
+    const r = await fetch(CONFIG.blockedUrl + "?t=" + Date.now(), {cache:"no-store"});
+    if(!r.ok) return;
     const j = await r.json();
-    (Array.isArray(j)?j:(j.blocked||[])).forEach(d => blocked.add(String(d).slice(0,10)));
+    (Array.isArray(j)?j:(j.blocked||[])).forEach(d => blocked.add(String(d).trim().slice(0,10)));
+    if(selected && blocked.has(selected)){ selected = null; updatePicked(); updateSummary(); }
     renderCal();
-  }catch(e){ console.warn("Αδυναμία φόρτωσης διαθεσιμότητας", e); }
+  }catch(e){ console.warn("Αδυναμία φόρτωσης blocked.json", e); }
 }
 
 function renderCal(){
@@ -253,7 +261,7 @@ function updatePicked(){
       '<div class="qty"><button type="button" aria-label="Μείωση">−</button><output>0</output><button type="button" aria-label="Αύξηση">+</button></div>';
     r.querySelector("b").textContent = p.name;
     r.querySelector("small").textContent = p.desc;
-    r.querySelector(".price").textContent = p.price + " €";
+    r.querySelector(".price").textContent = eur(gross(p.price));
     const out = r.querySelector("output"), [minus,plus] = r.querySelectorAll("button");
     minus.onclick = () => { if(qty[p.id]>0){ qty[p.id]--; out.textContent=qty[p.id]; updateSummary(); } };
     plus.onclick  = () => { qty[p.id]++; out.textContent=qty[p.id]; updateSummary(); };
@@ -262,10 +270,11 @@ function updatePicked(){
 })();
 
 function totals(){
-  const lines = MENU.filter(p => qty[p.id]>0).map(p => ({name:p.name, qty:qty[p.id], unit:p.price, total:qty[p.id]*p.price}));
+  const lines = MENU.filter(p => qty[p.id]>0).map(p => ({name:p.name, qty:qty[p.id], unit:p.price, total:Math.round(qty[p.id]*gross(p.price)*100)/100}));
   const pizzas = lines.reduce((a,l)=>a+l.total,0);
   const helper = $("helper").checked ? CONFIG.helper : 0;
-  return {lines, pizzas, helper, total: pizzas + CONFIG.liveCooking + helper, count: lines.reduce((a,l)=>a+l.qty,0)};
+  const total = Math.round((pizzas + CONFIG.liveCooking + helper) * 100) / 100;
+  return {lines, pizzas, helper, total, count: lines.reduce((a,l)=>a+l.qty,0)};
 }
 function updateSummary(){
   const t = totals(), ul = $("slist"); ul.innerHTML = "";
@@ -293,7 +302,7 @@ function orderText(o){
   o.lines.forEach(l => L.push("• "+l.qty+" × "+l.name+" — "+eur(l.total)));
   L.push("• Live Cooking Experience — "+eur(CONFIG.liveCooking));
   if(o.helper) L.push("• Βοηθητικό προσωπικό — "+eur(o.helper));
-  L.push("", "ΣΥΝΟΛΟ: "+eur(o.total));
+  L.push("", "ΣΥΝΟΛΟ (με ΦΠΑ 24%): "+eur(o.total));
   return L.join("\n");
 }
 function validate(){
@@ -319,26 +328,17 @@ $("submit").onclick = async () => {
   };
   o.text = orderText(o); last = o;
   $("submit").disabled = true;
-  let sent = false, failed = false, reserved = false;
+  let sent = false, failed = false;
 
-  /* 1) Κράτηση ημερομηνίας — μπλοκάρει την ημέρα (Google Sheet) */
-  if(CONFIG.bookingApi){
-    try{
-      const r = await fetch(CONFIG.bookingApi,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(o)});
-      const j = await r.json();
-      if(j.ok){ reserved = true; }
-      else {
-        $("submit").disabled = false;
-        if(j.error === "taken"){
-          blocked.add(o.date); selected = null; renderCal(); updatePicked(); updateSummary();
-          $("err").textContent = "Η ημερομηνία μόλις δεσμεύτηκε. Διάλεξε άλλη ημέρα.";
-        } else $("err").textContent = "Η κράτηση δεν ολοκληρώθηκε. Δοκίμασε ξανά.";
-        return;
-      }
-    }catch(e){ /* αν δεν απαντήσει ο server, συνεχίζουμε με email/WhatsApp */ }
+  /* Έλεγχος τελευταίας στιγμής: μήπως η ημέρα κλείστηκε όσο ο πελάτης συμπλήρωνε τη φόρμα */
+  await loadAvailability();
+  if(blocked.has(o.date)){
+    $("submit").disabled = false;
+    $("err").textContent = "Η ημερομηνία μόλις έκλεισε. Διάλεξε άλλη ημέρα.";
+    return;
   }
 
-  /* 2) Web3Forms → email */
+  /* Web3Forms → email */
   if(hasKey()){
     try{
       const r = await fetch(WEB3FORMS_URL,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},
@@ -352,7 +352,7 @@ $("submit").onclick = async () => {
           date: fmtDate(o.date) + " " + o.time,
           guests: o.guests || "-",
           venue: o.venue,
-          total: eur(o.total),
+          total: eur(o.total) + " (με ΦΠΑ 24%)",
           message: o.text,
           botcheck: $("botcheck").checked
         })});
@@ -360,7 +360,6 @@ $("submit").onclick = async () => {
       if(r.ok && j.success) sent = true; else failed = true;
     }catch(e){ failed = true; }
   }
-  if(reserved) sent = true;
   $("submit").disabled = false;
   showDone(o, sent, failed);
 };
