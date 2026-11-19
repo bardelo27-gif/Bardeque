@@ -152,7 +152,7 @@ footer b{color:#FF6B7F}
 const CONFIG = {
   ownerEmail: "bardequee@outlook.com.gr",   // email που θα λαμβάνει τις παραγγελίες (για κουμπί email)
   ownerWhatsApp: "306972295910",            // WhatsApp με κωδικό χώρας, χωρίς + ή κενά
-  orderEndpoint: "https://api.web3forms.com/submit",        // URL που δέχεται POST JSON (π.χ. Formspree / Power Automate / Google Apps Script)
+  orderEndpoint: "",         // URL που δέχεται POST JSON (π.χ. Formspree / Power Automate / Google Apps Script)
   availabilityUrl: "",       // URL που επιστρέφει JSON: ["2026-12-24","2026-12-25"] = κλεισμένες ημερομηνίες
   blockedDates: [],          // χειροκίνητα κλεισμένες ημερομηνίες, π.χ. ["2026-12-24","2026-12-25"]
   minLeadDays: 3,            // ελάχιστες ημέρες από σήμερα
@@ -318,7 +318,7 @@ $("submit").onclick = async () => {
   if(CONFIG.orderEndpoint){
     $("submit").disabled = true;
     try{
-      const r = await fetch(CONFIG.orderEndpoint,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(38749d88-ce63-4e72-a92b-d9f71211aac9)});
+      const r = await fetch(CONFIG.orderEndpoint,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(o)});
       sent = r.ok;
       if(!sent) $("err").textContent = "Η αποστολή απέτυχε. Δοκίμασε ξανά ή στείλε το αίτημα με email/WhatsApp.";
     }catch(e){ $("err").textContent = "Η αποστολή απέτυχε. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά."; }
