@@ -70,6 +70,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--red);outline-off
 .done h2{border:0;font-size:22px;letter-spacing:.1em}
 .done pre{text-align:left;background:var(--cream);border:1px solid var(--line);border-radius:8px;padding:14px;white-space:pre-wrap;font-family:inherit;max-width:560px;margin:14px auto}
 .done .btns{max-width:560px;margin:0 auto}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 footer{background:var(--ink);color:#fff;text-align:center;padding:16px;margin-top:40px;font-weight:600;font-size:14px}
 footer b{color:#FF6B7F}
 </style>
@@ -108,6 +109,7 @@ footer b{color:#FF6B7F}
         <div><label for="venue">ΧΩΡΟΣ ΕΚΔΗΛΩΣΗΣ (ΔΙΕΥΘΥΝΣΗ) *</label><input id="venue"></div>
       </div>
       <label for="notes">ΣΧΟΛΙΑ / ΑΛΛΕΡΓΙΕΣ</label><textarea id="notes" rows="3"></textarea>
+      <input type="checkbox" id="botcheck" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
 
       <h2><span>3</span>ΤΟ ΜΕΝΟΥ ΣΟΥ</h2>
       <div class="menu" id="menu"></div>
@@ -134,7 +136,7 @@ footer b{color:#FF6B7F}
   </div>
 
   <div class="done" id="done">
-    <h2>✔ ΤΟ ΑΙΤΗΜΑ ΣΟΥ ΕΣΤΑΛΗ</h2>
+    <h2 id="doneTitle">✔ ΤΟ ΑΙΤΗΜΑ ΣΟΥ ΕΣΤΑΛΗ</h2>
     <p id="doneMsg"></p>
     <pre id="doneText"></pre>
     <div class="btns">
@@ -150,9 +152,10 @@ footer b{color:#FF6B7F}
 <script>
 /* ============ ΡΥΘΜΙΣΕΙΣ — επεξεργάσου μόνο αυτό το μπλοκ ============ */
 const CONFIG = {
-  ownerEmail: "bardequee@outlook.com.gr",   // email που θα λαμβάνει τις παραγγελίες (για κουμπί email)
+  web3formsKey: "38749d88-ce63-4e72-a92b-d9f71211aac9",   // Access Key από το Web3Forms (έρχεται στο email σου)
+  ownerEmail: "bardequee@outlook.com.gr",   // εφεδρικό κουμπί email
   ownerWhatsApp: "306972295910",            // WhatsApp με κωδικό χώρας, χωρίς + ή κενά
-  orderEndpoint: "",         // URL που δέχεται POST JSON (π.χ. Formspree / Power Automate / Google Apps Script)
+  orderEndpoint: "",         // (προαιρετικό) άλλο URL που δέχεται POST JSON
   availabilityUrl: "",       // URL που επιστρέφει JSON: ["2026-12-24","2026-12-25"] = κλεισμένες ημερομηνίες
   blockedDates: [],          // χειροκίνητα κλεισμένες ημερομηνίες, π.χ. ["2026-12-24","2026-12-25"]
   minLeadDays: 3,            // ελάχιστες ημέρες από σήμερα
@@ -163,6 +166,8 @@ const CONFIG = {
   helperBase: 70, helperVat: 0.24   // βοηθός: 70 € + 24% = 86,80 €
 };
 CONFIG.helper = Math.round(CONFIG.helperBase * (1 + CONFIG.helperVat) * 100) / 100;
+const WEB3FORMS_URL = "https://api.web3forms.com/submit";
+const hasKey = () => CONFIG.web3formsKey && !/ΒΑΛΕ_ΕΔΩ/.test(CONFIG.web3formsKey);
 const MENU = [
   {id:"margherita", name:"Margherita",  desc:"Σάλτσα ντομάτας, παρμεζάνα, mozzarella", price:14, icon:"🌿"},
   {id:"mushrooms",  name:"Mushrooms",   desc:"Λευκή σάλτσα, παρμεζάνα, mozzarella, λάδι τρούφας, μανιτάρια", price:17, icon:"🌿"},
@@ -314,24 +319,53 @@ $("submit").onclick = async () => {
     lines: t.lines, helper: t.helper, total: t.total
   };
   o.text = orderText(o); last = o;
-  let sent = false;
+  $("submit").disabled = true;
+  let sent = false, failed = false;
+
+  /* 1) Web3Forms → email */
+  if(hasKey()){
+    try{
+      const r = await fetch(WEB3FORMS_URL,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},
+        body:JSON.stringify({
+          access_key: CONFIG.web3formsKey,
+          subject: "Νέα κράτηση BARDEQUEE · " + fmtDate(o.date) + " · " + o.name,
+          from_name: "BARDEQUEE Κρατήσεις",
+          name: o.name,
+          email: o.email,                 // γίνεται reply-to
+          phone: o.phone,
+          date: fmtDate(o.date) + " " + o.time,
+          guests: o.guests || "-",
+          venue: o.venue,
+          total: eur(o.total),
+          message: o.text,
+          botcheck: $("botcheck").checked
+        })});
+      const j = await r.json().catch(()=>({}));
+      if(r.ok && j.success) sent = true; else failed = true;
+    }catch(e){ failed = true; }
+  }
+  /* 2) προαιρετικό δεύτερο endpoint */
   if(CONFIG.orderEndpoint){
-    $("submit").disabled = true;
     try{
       const r = await fetch(CONFIG.orderEndpoint,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(o)});
-      sent = r.ok;
-      if(!sent) $("err").textContent = "Η αποστολή απέτυχε. Δοκίμασε ξανά ή στείλε το αίτημα με email/WhatsApp.";
-    }catch(e){ $("err").textContent = "Η αποστολή απέτυχε. Έλεγξε τη σύνδεσή σου και δοκίμασε ξανά."; }
-    $("submit").disabled = false;
-    if(!sent) return;
+      if(r.ok) sent = true; else if(!sent) failed = true;
+    }catch(e){ if(!sent) failed = true; }
   }
-  showDone(o, sent);
+  $("submit").disabled = false;
+  showDone(o, sent, failed);
 };
-function showDone(o, sent){
+function showDone(o, sent, failed){
   $("form").style.display="none"; $("done").style.display="block";
-  $("doneMsg").textContent = sent
-    ? "Λάβαμε το αίτημά σου. Θα επικοινωνήσουμε σύντομα για επιβεβαίωση της ημερομηνίας."
-    : "Το αίτημά σου είναι έτοιμο. Πάτα ένα από τα κουμπιά παρακάτω για να μας το στείλεις και να κλειδώσει η ημερομηνία.";
+  if(sent){
+    $("doneTitle").textContent = "✔ ΤΟ ΑΙΤΗΜΑ ΣΟΥ ΕΣΤΑΛΗ";
+    $("doneMsg").textContent = "Λάβαμε το αίτημά σου. Θα επικοινωνήσουμε σύντομα για επιβεβαίωση της ημερομηνίας.";
+  } else if(failed){
+    $("doneTitle").textContent = "ΜΙΑ ΑΚΟΜΑ ΜΙΚΡΗ ΚΙΝΗΣΗ";
+    $("doneMsg").textContent = "Η αυτόματη αποστολή δεν ολοκληρώθηκε. Πάτα ένα από τα κουμπιά παρακάτω για να μας στείλεις το αίτημα.";
+  } else {
+    $("doneTitle").textContent = "ΤΟ ΑΙΤΗΜΑ ΣΟΥ ΕΙΝΑΙ ΕΤΟΙΜΟ";
+    $("doneMsg").textContent = "Πάτα ένα από τα κουμπιά παρακάτω για να μας στείλεις το αίτημα και να κλειδώσει η ημερομηνία.";
+  }
   $("doneText").textContent = o.text;
   const enc = encodeURIComponent(o.text);
   if(CONFIG.ownerWhatsApp){ const a=$("wa"); a.style.display="block"; a.href="https://wa.me/"+CONFIG.ownerWhatsApp+"?text="+enc; }
